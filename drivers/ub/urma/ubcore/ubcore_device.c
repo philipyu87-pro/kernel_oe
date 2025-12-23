@@ -1550,11 +1550,11 @@ ubcore_alloc_ucontext(struct ubcore_device *dev, uint32_t eid_index,
 		return ERR_PTR(-EINVAL);
 	}
 
-	if (!ubcore_dev_accessible(dev, current->nsproxy->net_ns) ||
-	    !ubcore_eid_accessible(dev, eid_index)) {
-		ubcore_log_err("eid is not accessible by current ns.\n");
-		return ERR_PTR(-EPERM);
-	}
+	// if (!ubcore_dev_accessible(dev, current->nsproxy->net_ns) ||
+	//     !ubcore_eid_accessible(dev, eid_index)) {
+	// 	ubcore_log_err("eid is not accessible by current ns.\n");
+	// 	return ERR_PTR(-EPERM);
+	// }
 
 	ret = ubcore_cgroup_try_charge(&cg_obj, dev,
 				       UBCORE_RESOURCE_HCA_HANDLE);
