@@ -79,7 +79,7 @@ void ubagg_dev_ref_put(struct ubagg_device *dev)
 
 struct ubagg_dev_name_eid_arr {
 	char master_dev_name[UBAGG_MAX_DEV_NAME_LEN];
-	char aggr_eid[EID_LEN];
+	char agg_eid[EID_LEN];
 };
 static struct ubagg_dev_name_eid_arr
 	g_name_eid_arr[UBAGG_MAX_BONDING_DEV_NUM] = { 0 };
@@ -1230,11 +1230,11 @@ static int rmv_dev(struct ubagg_cmd_hdr *hdr)
 	return 0;
 }
 
-static bool is_aggr_dev_valid(struct ubagg_topo_aggr_dev *aggr_dev)
+static bool is_agg_dev_valid(struct ubagg_topo_agg_dev *agg_dev)
 {
-	struct ubagg_topo_aggr_dev empty_dev = {0};
+	struct ubagg_topo_agg_dev empty_dev = {0};
 
-	return (memcmp(aggr_dev, &empty_dev, sizeof(struct ubagg_topo_aggr_dev)) == 0) ? false : true;
+	return (memcmp(agg_dev, &empty_dev, sizeof(struct ubagg_topo_agg_dev)) == 0) ? false : true;
 }
 
 static bool is_eid_valid(const char *eid)
@@ -1255,11 +1255,11 @@ static bool is_aggr_and_primary_eid_valid(struct ubagg_topo_map *topo_map)
 
 	for (node_id = 0; node_id < topo_map->node_num; node_id++) {
 		for (dev_id = 0; dev_id < DEV_NUM; dev_id++) {
-			if (!is_eid_valid(topo_map->topo_infos[node_id].devs[dev_id].aggr_eid))
+			if (!is_eid_valid(topo_map->topo_infos[node_id].agg_devs[dev_id].agg_eid))
 				return false;
 			has_primary_eid = false;
 			for (iodie_id = 0; iodie_id < IODIE_NUM; iodie_id++) {
-				if (is_eid_valid(topo_map->topo_infos[node_id].devs[dev_id].fe[iodie_id].primary_eid))
+				if (is_eid_valid(topo_map->topo_infos[node_id].agg_devs[dev_id].ues[iodie_id].primary_eid))
 					has_primary_eid = true;
 			}
 			if (!has_primary_eid)
@@ -1298,9 +1298,9 @@ static void update_dev_info(struct ubagg_topo_node *new_topo_info,
 	int dev_id;
 
 	for (dev_id = 0; dev_id < DEV_NUM; dev_id++) {
-		if (is_aggr_dev_valid(&old_topo_info->devs[dev_id])) {
-			(void)memcpy(&old_topo_info->devs[dev_id], &new_topo_info->devs[dev_id],
-				sizeof(struct ubagg_topo_aggr_dev));
+		if (is_agg_dev_valid(&old_topo_info->agg_devs[dev_id])) {
+			(void)memcpy(&old_topo_info->agg_devs[dev_id], &new_topo_info->agg_devs[dev_id],
+				sizeof(struct ubagg_topo_agg_dev));
 		}
 		// TODO: update eid
 	}
@@ -1370,17 +1370,17 @@ static int ubagg_update_topo_info(struct ubagg_topo_map *new_topo_map,
 	return update_link_info(new_cur_node_info, old_cur_node_info);
 }
 
-static bool has_add_dev_by_aggr_eid(const char *aggr_eid)
+static bool has_add_dev_by_agg_eid(const char *agg_eid)
 {
 	int i;
 
-	if (aggr_eid == NULL) {
-		ubagg_log_err("aggr_eid is NULL");
+	if (agg_eid == NULL) {
+		ubagg_log_err("agg_eid is NULL");
 		return false;
 	}
 	mutex_lock(&g_name_eid_arr_lock);
 	for (i = 0; i < UBAGG_MAX_BONDING_DEV_NUM; i++) {
-		if (is_eid_match(aggr_eid, g_name_eid_arr[i].aggr_eid)) {
+		if (is_eid_match(agg_eid, g_name_eid_arr[i].agg_eid)) {
 			mutex_unlock(&g_name_eid_arr_lock);
 			return true;
 		}
@@ -1389,20 +1389,20 @@ static bool has_add_dev_by_aggr_eid(const char *aggr_eid)
 	return false;
 }
 
-static void fill_add_dev_cfg(struct ubagg_topo_aggr_dev *aggr_dev,
+static void fill_add_dev_cfg(struct ubagg_topo_agg_dev *agg_dev,
 			     struct ubagg_add_dev_by_uvs *arg)
 {
 	int i, j, k;
 
-	(void)memcpy(&arg->aggr_eid, aggr_dev->aggr_eid, EID_LEN);
+	(void)memcpy(&arg->agg_eid, agg_dev->agg_eid, EID_LEN);
 	for (i = 0; i < IODIE_NUM; i++)
 		(void)memcpy(&arg->slave_eid[i].primary_eid,
-			     aggr_dev->fe[i].primary_eid, EID_LEN);
+			     agg_dev->ues[i].primary_eid, EID_LEN);
 
 	for (j = 0; j < IODIE_NUM; j++) {
 		for (k = 0; k < MAX_PORT_NUM; k++)
 			(void)memcpy(&arg->slave_eid[j].port_eid[k],
-				     aggr_dev->fe[j].port_eid[k],
+				     agg_dev->ues[j].port_eid[k],
 				     EID_LEN);
 	}
 }
@@ -1544,7 +1544,7 @@ static int init_ubagg_ubcore_dev(struct ubagg_device *ubagg_dev,
 	ubagg_dev->ub_dev.eid_table.eid_entries[0].eid_index = 0;
 	ubagg_dev->ub_dev.eid_table.eid_entries[0].net = &init_net;
 	(void)memcpy(&ubagg_dev->ub_dev.eid_table.eid_entries[0].eid,
-		     &arg->aggr_eid, UBAGG_EID_SIZE);
+		     &arg->agg_eid, UBAGG_EID_SIZE);
 	ubagg_dev->ub_dev.eid_table.eid_entries[0].valid = true;
 
 	return 0;
@@ -1657,14 +1657,14 @@ static bool is_eid_empty(const char *eid)
 	return true;
 }
 
-static void find_add_master_dev(const char *aggr_eid, const char *name)
+static void find_add_master_dev(const char *agg_eid, const char *name)
 {
 	int i;
 	int empty_index = -1;
 
 	mutex_lock(&g_name_eid_arr_lock);
 	for (i = 0; i < UBAGG_MAX_BONDING_DEV_NUM; i++) {
-		if (is_eid_empty(g_name_eid_arr[i].aggr_eid)) {
+		if (is_eid_empty(g_name_eid_arr[i].agg_eid)) {
 			empty_index = i;
 			break;
 		}
@@ -1675,7 +1675,7 @@ static void find_add_master_dev(const char *aggr_eid, const char *name)
 			      UBAGG_MAX_BONDING_DEV_NUM);
 		return;
 	}
-	(void)memcpy(g_name_eid_arr[empty_index].aggr_eid, aggr_eid,
+	(void)memcpy(g_name_eid_arr[empty_index].agg_eid, agg_eid,
 		     EID_LEN);
 	(void)snprintf(g_name_eid_arr[empty_index].master_dev_name,
 		       UBAGG_MAX_DEV_NAME_LEN, "%s", name);
@@ -1688,7 +1688,7 @@ static int ubagg_add_dev_by_uvs(struct ubagg_topo_map *topo_map)
 	struct ubagg_add_dev_by_uvs arg = { 0 };
 	char *master_dev_name = NULL;
 	uint32_t cur_node_index = 0;
-	const char *aggr_eid = NULL;
+	const char *agg_eid = NULL;
 	int dev_id;
 
 	if (find_cur_node_index(topo_map, &cur_node_index) != 0) {
@@ -1699,13 +1699,13 @@ static int ubagg_add_dev_by_uvs(struct ubagg_topo_map *topo_map)
 
 	// add DEV_NUM devs for every node
 	for (dev_id = 0; dev_id < DEV_NUM; dev_id++) {
-		if (!is_aggr_dev_valid(&cur_node_info->devs[dev_id])) {
+		if (!is_agg_dev_valid(&cur_node_info->agg_devs[dev_id])) {
 			continue;
 		}
-		aggr_eid = cur_node_info->devs[dev_id].aggr_eid;
-		if (has_add_dev_by_aggr_eid(aggr_eid)) {
+		agg_eid = cur_node_info->agg_devs[dev_id].agg_eid;
+		if (has_add_dev_by_agg_eid(agg_eid)) {
 			ubagg_log_info("has add dev by aggr eid: " EID_FMT "\n",
-					EID_RAW_ARGS(aggr_eid));
+					EID_RAW_ARGS(agg_eid));
 			continue;
 		}
 
@@ -1717,7 +1717,7 @@ static int ubagg_add_dev_by_uvs(struct ubagg_topo_map *topo_map)
 
 		(void)snprintf(arg.master_dev_name, UBAGG_MAX_DEV_NAME_LEN, "%s",
 				master_dev_name);
-		fill_add_dev_cfg(&cur_node_info->devs[dev_id], &arg);
+		fill_add_dev_cfg(&cur_node_info->agg_devs[dev_id], &arg);
 
 		if (add_dev_by_uvs(&arg) != 0) {
 			// TODO：是否需要释放前面加入的设备？
@@ -1726,7 +1726,7 @@ static int ubagg_add_dev_by_uvs(struct ubagg_topo_map *topo_map)
 			ubagg_log_err("add ubagg dev by uvs failed\n");
 			return -1;
 		}
-		find_add_master_dev(cur_node_info->devs[dev_id].aggr_eid, master_dev_name);
+		find_add_master_dev(cur_node_info->agg_devs[dev_id].agg_eid, master_dev_name);
 		kfree(master_dev_name);
 		master_dev_name = NULL;
 	}
@@ -1765,25 +1765,25 @@ static void print_topo_map(struct ubagg_topo_map *topo_map)
 			}
 		}
 
-        /* print device list (only devices with valid aggr_eid) */
+        /* print device list (only devices with valid agg_eid) */
         for (dev_idx = 0; dev_idx < DEV_NUM; dev_idx++) {
-            if (!is_eid_valid(node->devs[dev_idx].aggr_eid))
+            if (!is_eid_valid(node->agg_devs[dev_idx].agg_eid))
                 continue;
 
-            ubagg_log_info("---- dev %d aggr_eid: " EID_FMT "\n", dev_idx,
-                    EID_RAW_ARGS(node->devs[dev_idx].aggr_eid));
+            ubagg_log_info("---- dev %d agg_eid: " EID_FMT "\n", dev_idx,
+                    EID_RAW_ARGS(node->agg_devs[dev_idx].agg_eid));
 
             for (iodie_idx = 0; iodie_idx < IODIE_NUM; iodie_idx++) {
                 ubagg_log_info("------ socket_id[%d]: %u\n", iodie_idx,
-                        node->devs[dev_idx].fe[iodie_idx].socket_id);
+                        node->agg_devs[dev_idx].ues[iodie_idx].socket_id);
 
                 ubagg_log_info("------ primary_eid[%d]: " EID_FMT "\n", iodie_idx,
-                        EID_RAW_ARGS(node->devs[dev_idx].fe[iodie_idx].primary_eid));
+                        EID_RAW_ARGS(node->agg_devs[dev_idx].ues[iodie_idx].primary_eid));
 
                 for (port_idx = 0; port_idx < MAX_PORT_NUM; port_idx++) {
                     ubagg_log_info("-------- port_eid[%d][%d]: " EID_FMT "\n",
                             iodie_idx, port_idx,
-                            EID_RAW_ARGS(node->devs[dev_idx].fe[iodie_idx].port_eid[port_idx]));
+                            EID_RAW_ARGS(node->agg_devs[dev_idx].ues[iodie_idx].port_eid[port_idx]));
                 }
             }
         }

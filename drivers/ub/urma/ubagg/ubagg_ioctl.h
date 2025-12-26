@@ -167,7 +167,7 @@ struct ubagg_primary_port_eid {
 
 struct ubagg_add_dev_by_uvs {
 	char master_dev_name[UBAGG_MAX_DEV_NAME_LEN];
-	union ubcore_eid aggr_eid;
+	union ubcore_eid agg_eid;
 	struct ubagg_primary_port_eid slave_eid[IODIE_NUM];
 };
 

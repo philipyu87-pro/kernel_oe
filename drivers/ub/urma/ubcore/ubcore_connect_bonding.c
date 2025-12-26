@@ -66,8 +66,8 @@ static struct ubcore_device *ubcore_find_physical_device(void)
 
 	// 首个非空设备的首个iodie的primary_eid
 	for (dev_id = 0; dev_id < DEV_NUM; dev_id++) {
-		if (is_aggr_dev_valid(&topo_info->devs[dev_id])) {
-			primary_eid = (union ubcore_eid *)topo_info->devs[dev_id].fe[0].primary_eid;
+		if (is_agg_dev_valid(&topo_info->agg_devs[dev_id])) {
+			primary_eid = (union ubcore_eid *)topo_info->agg_devs[dev_id].ues[0].primary_eid;
 			return ubcore_find_device(primary_eid, UBCORE_TRANSPORT_UB);
 		}
 	}
@@ -79,7 +79,7 @@ static struct ubcore_device *ubcore_find_bonding_device(void)
 {
 	struct ubcore_topo_map *topo_map;
 	struct ubcore_topo_node *topo_info;
-	union ubcore_eid *aggr_eid;
+	union ubcore_eid *agg_eid;
 	int dev_id;
 
 	topo_map = ubcore_get_global_topo_map();
@@ -95,9 +95,9 @@ static struct ubcore_device *ubcore_find_bonding_device(void)
 	}
 
 	for (dev_id = 0; dev_id < DEV_NUM; dev_id++) {
-		if (is_aggr_dev_valid(&topo_info->devs[dev_id])) {
-			aggr_eid = (union ubcore_eid *)topo_info->devs[dev_id].aggr_eid;
-			return ubcore_find_device(aggr_eid, UBCORE_TRANSPORT_UB);
+		if (is_agg_dev_valid(&topo_info->agg_devs[dev_id])) {
+			agg_eid = (union ubcore_eid *)topo_info->agg_devs[dev_id].agg_eid;
+			return ubcore_find_device(agg_eid, UBCORE_TRANSPORT_UB);
 		}
 	}
 	return NULL;
@@ -142,7 +142,7 @@ static int send_seg_info_req(struct ubcore_device *dev, uint32_t session_id,
 	msg.session_id = session_id;
 	msg.data = req;
 
-	ret = ubcore_get_primary_eid_by_aggr_eid(&req->ubva.eid, &dest_eid);
+	ret = ubcore_get_primary_eid_by_agg_eid(&req->ubva.eid, &dest_eid);
 	if (ret != 0)
 		return ret;
 
@@ -188,7 +188,7 @@ static int send_jetty_info_req(struct ubcore_device *dev, uint32_t session_id,
 	msg.session_id = session_id;
 	msg.data = req;
 
-	ret = ubcore_get_primary_eid_by_aggr_eid(&req->jetty_id.eid,
+	ret = ubcore_get_primary_eid_by_agg_eid(&req->jetty_id.eid,
 						    &dest_eid);
 	if (ret != 0)
 		return ret;

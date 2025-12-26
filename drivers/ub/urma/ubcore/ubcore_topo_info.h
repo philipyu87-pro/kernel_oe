@@ -19,17 +19,18 @@
 #define MAX_NODE_NUM (16)
 #define IODIE_NUM (2)
 #define PORT_NUM (9)
-#define DEV_NUM (64)
+#define DEV_NUM (1)
+#define MAX_NODE_NUM (16)
 
-struct ubcore_topo_fe {
+struct ubcore_topo_ue {
 	uint32_t socket_id;
 	char primary_eid[EID_LEN];
 	char port_eid[PORT_NUM][EID_LEN];
 };
 
-struct ubcore_topo_aggr_dev {
-	char aggr_eid[EID_LEN];
-	struct ubcore_topo_fe fe[IODIE_NUM];
+struct ubcore_topo_agg_dev {
+	char agg_eid[EID_LEN];
+	struct ubcore_topo_ue ues[IODIE_NUM];
 };
 
 struct ubcore_topo_link {
@@ -42,7 +43,7 @@ struct ubcore_topo_node {
 	uint32_t id;
 	uint32_t is_current;
 	struct ubcore_topo_link links[IODIE_NUM][PORT_NUM];
-	struct ubcore_topo_aggr_dev devs[DEV_NUM];
+	struct ubcore_topo_agg_dev agg_devs[DEV_NUM];
 };
 
 struct ubcore_topo_map {
@@ -59,9 +60,9 @@ struct ubcore_topo_map *
 ubcore_create_topo_map_from_user(struct ubcore_topo_node *user_topo_infos,
 				 uint32_t node_num);
 void ubcore_delete_topo_map(struct ubcore_topo_map *topo_map);
-bool is_aggr_dev_valid(struct ubcore_topo_aggr_dev *aggr_dev);
+bool is_agg_dev_valid(struct ubcore_topo_agg_dev *agg_dev);
 bool is_eid_valid(const char *eid);
-bool is_aggr_and_primary_eid_valid(struct ubcore_topo_map *topo_map);
+bool is_agg_and_primary_eid_valid(struct ubcore_topo_map *topo_map);
 struct ubcore_topo_node *
 ubcore_get_cur_topo_info(struct ubcore_topo_map *topo_map);
 int ubcore_update_topo_map(struct ubcore_topo_map *new_topo_map,
@@ -70,7 +71,7 @@ void ubcore_show_topo_map(struct ubcore_topo_map *topo_map);
 int ubcore_get_primary_eid(union ubcore_eid *eid,
 			   union ubcore_eid *primary_eid);
 
-int ubcore_get_primary_eid_by_aggr_eid(union ubcore_eid *aggr_eid,
+int ubcore_get_primary_eid_by_agg_eid(union ubcore_eid *agg_eid,
 	union ubcore_eid *primary_eid);
 
 #endif // UBCORE_TOPO_INFO_H
