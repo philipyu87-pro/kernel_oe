@@ -304,9 +304,9 @@ int ubcore_get_primary_eid(union ubcore_eid *eid, union ubcore_eid *primary_eid)
 	for (node_id = 0; node_id < g_ubcore_topo_map->node_num; node_id++) {
 		cur_node_info = g_ubcore_topo_map->topo_infos + node_id;
 		for (dev_id = 0; dev_id < DEV_NUM; dev_id++) {
-			if (!is_eid_match(cur_node_info->devs[dev_id].aggr_eid,
+			if (is_eid_match(cur_node_info->devs[dev_id].aggr_eid,
 				 (char *)eid->raw)) {
-				ubcore_log_err("failed to get primary eid using aggr eid\n");
+				ubcore_log_err("input eid is bonding eid!\n");
 				return -EINVAL;
 			}
 

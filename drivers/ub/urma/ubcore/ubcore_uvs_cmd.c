@@ -174,57 +174,54 @@ static int ubcore_create_jetty_rsrc(struct ubcore_topo_map *topo_map)
 {
     struct ubcore_device *dev;
     struct ubcore_eid_info eid_info = { 0 };
-    struct ubcore_topo_node *node;
+    struct ubcore_topo_node *cur_node_info;
 	bool has_any_primary_eid = false;
-    int node_idx, dev_idx, die_idx;
+    int dev_idx, die_idx;
     int ret;
 
-    if (!topo_map) {
-        ubcore_log_err("topo_map is NULL\n");
-        return -EINVAL;
-    }
+    cur_node_info = ubcore_get_cur_topo_info(topo_map);
+	if (cur_node_info == NULL) {
+		ubcore_log_err("Failed to get current node info\n");
+		return -EINVAL;
+	}
 
-    for (node_idx = 0; node_idx < topo_map->node_num; node_idx++) {
-        node = &topo_map->topo_infos[node_idx];
+    for (dev_idx = 0; dev_idx < DEV_NUM; dev_idx++) {
+        for (die_idx = 0; die_idx < IODIE_NUM; die_idx++) {
+            if (!is_eid_valid(cur_node_info->devs[dev_idx].fe[die_idx].primary_eid))
+                continue;
 
-        for (dev_idx = 0; dev_idx < DEV_NUM; dev_idx++) {
-            for (die_idx = 0; die_idx < IODIE_NUM; die_idx++) {
-                if (!is_eid_valid(node->devs[dev_idx].fe[die_idx].primary_eid))
-                    continue;
+            has_any_primary_eid = true;
+            (void)memcpy(&eid_info.eid,
+                    cur_node_info->devs[dev_idx].fe[die_idx].primary_eid,
+                    sizeof(union ubcore_eid));
 
-                has_any_primary_eid = true;
-                (void)memcpy(&eid_info.eid,
-                         node->devs[dev_idx].fe[die_idx].primary_eid,
-                         sizeof(union ubcore_eid));
-
-                dev = ubcore_get_device_by_eid(&eid_info.eid,
+            dev = ubcore_get_device_by_eid(&eid_info.eid,
                                    UBCORE_TRANSPORT_UB);
-                if (dev == NULL) {
-                    ubcore_log_err("primary dev not exist, node %d dev %d die %d, eid: " EID_FMT "\n",
-                            node_idx, dev_idx, die_idx,
-                            EID_RAW_ARGS(node->devs[dev_idx].fe[die_idx].primary_eid));
-                    return -1;
-                }
-
-                ret = ubcore_get_eid_index(dev, &eid_info.eid,
-                               &eid_info.eid_index);
-                if (ret != 0) {
-                    ubcore_log_err("Failed to get eid index\n");
-                    return ret;
-                }
-
-                ret = ubcore_call_cm_eid_ops(dev, &eid_info,
-                                 UBCORE_MGMT_EVENT_EID_ADD);
-                if (ret != 0) {
-                    ubcore_log_err("Failed to call cm eid ops\n");
-                    return ret;
-                }
-
-                ubcore_log_info("Created jetty rsrc: node %d dev %d primary die %d, eid: " EID_FMT ", idx: %d\n",
-                        node_idx, dev_idx, die_idx,
-                        EID_RAW_ARGS(node->devs[dev_idx].fe[die_idx].primary_eid),
-                        eid_info.eid_index);
+            if (dev == NULL) {
+                ubcore_log_err("primary dev not exist, node %d dev %d die %d, eid: " EID_FMT "\n",
+                        cur_node_info->id, dev_idx, die_idx,
+                        EID_RAW_ARGS(cur_node_info->devs[dev_idx].fe[die_idx].primary_eid));
+                return -1;
             }
+
+            ret = ubcore_get_eid_index(dev, &eid_info.eid,
+                        &eid_info.eid_index);
+            if (ret != 0) {
+                ubcore_log_err("Failed to get eid index\n");
+                return ret;
+            }
+
+            ret = ubcore_call_cm_eid_ops(dev, &eid_info,
+                        UBCORE_MGMT_EVENT_EID_ADD);
+            if (ret != 0) {
+                ubcore_log_err("Failed to call cm eid ops\n");
+                return ret;
+            }
+
+            ubcore_log_info("Created jetty rsrc: node %d dev %d primary die %d, eid: " EID_FMT ", idx: %d\n",
+                cur_node_info->id, dev_idx, die_idx,
+                EID_RAW_ARGS(cur_node_info->devs[dev_idx].fe[die_idx].primary_eid),
+                eid_info.eid_index);
         }
     }
 

@@ -17,7 +17,7 @@
 #define MAX_PORT_NUM (9)
 #define MAX_NODE_NUM (16)
 #define IODIE_NUM (2)
-#define DEV_NUM (64)
+#define DEV_NUM (1)
 
 struct ubagg_topo_fe {
 	uint32_t socket_id;
