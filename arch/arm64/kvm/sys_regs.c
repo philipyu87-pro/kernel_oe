@@ -662,7 +662,9 @@ static void reset_mpidr(struct kvm_vcpu *vcpu, const struct sys_reg_desc *r)
 	mpidr = (vcpu->vcpu_id & 0x0f) << MPIDR_LEVEL_SHIFT(0);
 	mpidr |= ((vcpu->vcpu_id >> 4) & 0xff) << MPIDR_LEVEL_SHIFT(1);
 	mpidr |= ((vcpu->vcpu_id >> 12) & 0xff) << MPIDR_LEVEL_SHIFT(2);
-	vcpu_write_sys_reg(vcpu, (1ULL << 31) | mpidr, MPIDR_EL1);
+
+	mpidr |= (1ULL << 31);
+	vcpu_write_sys_reg(vcpu, mpidr, MPIDR_EL1);
 }
 
 static void reset_pmcr(struct kvm_vcpu *vcpu, const struct sys_reg_desc *r)
@@ -1282,6 +1284,29 @@ static int set_id_aa64pfr0_el1(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
+#ifdef CONFIG_ARM64_HISI_IPIV
+extern struct static_key_false ipiv_enable;
+static int set_mpidr(struct kvm_vcpu *vcpu, const struct sys_reg_desc *rd,
+		     const struct kvm_one_reg *reg, void __user *uaddr)
+{
+	u64 val;
+	if (get_user(val, (u64 __user *)uaddr))
+		return -EFAULT;
+
+	if (static_branch_unlikely(&ipiv_enable) &&
+	    vcpu->kvm->arch.vgic.its_vm.enable_ipiv_from_vmm) {
+		if (val != __vcpu_sys_reg(vcpu, rd->reg)) {
+			kvm_err("IPIV ERROR: MPIDR changed\n");
+			return -EINVAL;
+		}
+	}
+
+	__vcpu_sys_reg(vcpu, rd->reg) = val;
+
+	return 0;
+}
+#endif
+
 /*
  * cpufeature ID register user accessors
  */
@@ -1495,7 +1520,12 @@ static const struct sys_reg_desc sys_reg_descs[] = {
 
 	{ SYS_DESC(SYS_DBGVCR32_EL2), NULL, reset_val, DBGVCR32_EL2, 0 },
 
+#ifdef CONFIG_ARM64_HISI_IPIV
+	{ SYS_DESC(SYS_MPIDR_EL1),
+	  .reset = reset_mpidr, .reg = MPIDR_EL1, .set_user = set_mpidr},
+#else
 	{ SYS_DESC(SYS_MPIDR_EL1), NULL, reset_mpidr, MPIDR_EL1 },
+#endif
 
 	/*
 	 * ID regs: all ID_SANITISED() entries here must have corresponding
