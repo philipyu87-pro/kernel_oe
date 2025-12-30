@@ -463,6 +463,7 @@ EXPORT_SYMBOL_GPL(ub_start_ent);
 static void ub_release_ent(struct device *dev)
 {
 	struct ub_entity *uent;
+	u32 uent_num;
 
 	uent = to_ub_entity(dev);
 	if (is_primary(uent) && !is_p_device(uent)) {
@@ -480,8 +481,9 @@ static void ub_release_ent(struct device *dev)
 
 	kfree(uent->driver_override);
 	uent->token_value = 0;
+	uent_num = uent->uent_num;
 	kfree(uent);
-	pr_info("uent release\n");
+	pr_info("uent[%#x] release\n", uent_num);
 }
 
 void ub_stop_ent(struct ub_entity *uent)
@@ -1054,9 +1056,6 @@ EXPORT_SYMBOL_GPL(ub_unset_user_info);
 static struct ub_entity *ub_get_ue_by_entity_idx(struct ub_entity *pue, u32 entity_idx)
 {
 	struct ub_entity *ue;
-
-	if (ub_check_ue_para(pue, entity_idx))
-		return NULL;
 
 	list_for_each_entry(ue, &pue->ue_list, node) {
 		if (ue->entity_idx == entity_idx)

@@ -16,6 +16,7 @@
 #include "obmm_preimport.h"
 #include "obmm_resource.h"
 #include "obmm_addr_check.h"
+#include "obmm_shm_dev.h"
 
 static void set_import_region_datapath(const struct obmm_import_region *i_reg,
 				       struct obmm_datapath *datapath)
@@ -38,8 +39,7 @@ static unsigned long get_pa_range_mem_cap(u32 scna, phys_addr_t pa, size_t size)
 	if (ub_memory_validate_pa(scna, pa_start, pa_end, false))
 		mem_cap |= OBMM_MEM_ALLOW_NONCACHEABLE_MMAP;
 	if (mem_cap == 0)
-		pr_err("PA range invalid. Non-UBMEM memory cannot be mmaped as import memory: pa=%pa, size=%#zx\n",
-		       &pa_start, size);
+		pr_err("PA range invalid. Non-UBMEM memory cannot be mmaped as import memory\n");
 
 	return mem_cap;
 }
@@ -60,8 +60,7 @@ static int setup_pa(struct obmm_import_region *i_reg)
 
 		ubmem_res = setup_ubmem_resource(i_reg->pa, i_reg->region.mem_size, false);
 		if (IS_ERR(ubmem_res)) {
-			pr_err("failed to setup ubmem resource. pa=%pa, size=%#llx, ret=%pe\n",
-			       &i_reg->pa, i_reg->region.mem_size, ubmem_res);
+			pr_err("failed to setup ubmem resource: ret=%pe\n", ubmem_res);
 			return PTR_ERR(ubmem_res);
 		}
 		i_reg->ubmem_res = ubmem_res;
@@ -73,7 +72,7 @@ static int setup_pa(struct obmm_import_region *i_reg)
 	end = i_reg->pa + i_reg->region.mem_size - 1;
 	set_import_region_datapath(i_reg, &datapath);
 
-	return preimport_commit_prefilled(start, end, &datapath, &i_reg->numa_id,
+	ret = preimport_commit_prefilled(start, end, &datapath, &i_reg->numa_id,
 					  &i_reg->preimport_handle);
 	if (ret)
 		return ret;
@@ -99,17 +98,24 @@ static int teardown_remote_numa(struct obmm_import_region *i_reg, bool force)
 {
 	int ret, this_ret;
 
-	pr_info("call external: remove_memory_remote(nid=%d, pa=%#llx, size=%#llx)\n",
-		i_reg->numa_id, i_reg->pa, i_reg->region.mem_size);
+	ret = lock_save_memdev_descendents(i_reg->ubmem_res);
+	if (ret)
+		return ret;
+
+	pr_info("call external: remove_memory_remote(nid=%d, size=%#llx)\n",
+		i_reg->numa_id, i_reg->region.mem_size);
 	ret = remove_memory_remote(i_reg->numa_id, i_reg->pa, i_reg->region.mem_size);
 	pr_debug("external called: remove_memory_remote, ret=%pe\n", ERR_PTR(ret));
 	/* a full rollback is still possible: check whether this is a full teardown */
-	if (ret != 0 && !force)
-		return ret;
+	if (ret != 0 && !force) {
+		pr_err("remove_memory_remote(nid=%d, size=%#llx) failed: ret=%pe.\n",
+		       i_reg->numa_id, i_reg->region.mem_size, ERR_PTR(ret));
+		goto out_recover_resource;
+	}
 
 	if (region_preimport(&i_reg->region)) {
-		pr_info("call external: add_memory_remote(nid=%d, start=0x%llx, size=0x%llx, flags=MEMORY_KEEP_ISOLATED)\n",
-			i_reg->numa_id, i_reg->pa, i_reg->region.mem_size);
+		pr_info("call external: add_memory_remote(nid=%d, size=0x%llx, flags=MEMORY_KEEP_ISOLATED)\n",
+			i_reg->numa_id, i_reg->region.mem_size);
 		this_ret = add_memory_remote(i_reg->numa_id, i_reg->pa, i_reg->region.mem_size,
 					     MEMORY_KEEP_ISOLATED);
 		pr_debug("external called: add_memory_remote() returned %d\n", this_ret);
@@ -119,6 +125,8 @@ static int teardown_remote_numa(struct obmm_import_region *i_reg, bool force)
 		}
 	}
 
+out_recover_resource:
+	restore_unlock_memdev_descendents(i_reg->ubmem_res);
 	return ret;
 }
 
@@ -132,13 +140,12 @@ static int setup_remote_numa(struct obmm_import_region *i_reg)
 		flags = MEMORY_DIRECT_ONLINE;
 
 	if (!(i_reg->region.mem_cap & OBMM_MEM_ALLOW_CACHEABLE_MMAP)) {
-		pr_err("PA range invalid. Cacheable memory cannot be managed with numa.remote: pa=%pa, size=%#llx\n",
-		       &i_reg->pa, i_reg->region.mem_size);
+		pr_err("PA range invalid. Cacheable memory cannot be managed with numa.remote\n");
 		return -EINVAL;
 	}
 
-	pr_info("call external: add_memory_remote(nid=%d, start=0x%llx, size=0x%llx, flags=%d)\n",
-		i_reg->numa_id, i_reg->pa, i_reg->region.mem_size, flags);
+	pr_info("call external: add_memory_remote(nid=%d, flags=%d)\n",
+		i_reg->numa_id, flags);
 	ret = add_memory_remote(i_reg->numa_id, i_reg->pa, i_reg->region.mem_size, flags);
 	pr_debug("external called: add_memory_remote() returned %d\n", ret);
 	if (ret < 0) {
@@ -192,6 +199,35 @@ static int free_addr_range(const struct obmm_import_region *i_reg)
 	return 0;
 }
 
+static int setup_iomem_resource(struct obmm_import_region *i_reg)
+{
+	struct resource *memdev_res;
+
+	memdev_res = setup_memdev_resource(i_reg->ubmem_res, i_reg->pa,
+					   i_reg->region.mem_size, i_reg->region.regionid);
+	if (IS_ERR(memdev_res)) {
+		pr_err("memid=%d: failed to setup memdev resource: %pe\n",
+		       i_reg->region.regionid, memdev_res);
+		return PTR_ERR(memdev_res);
+	}
+
+	i_reg->memdev_res = memdev_res;
+
+	return 0;
+}
+
+static int teardown_iomem_resource(struct obmm_import_region *i_reg)
+{
+	int ret;
+
+	ret = release_memdev_resource(i_reg->ubmem_res, i_reg->memdev_res);
+	if (ret)
+		pr_err("memid=%d: failed to release memdev resource: %pe\n",
+		       i_reg->region.regionid, ERR_PTR(ret));
+
+	return ret;
+}
+
 static int prepare_import_memory(struct obmm_import_region *i_reg)
 {
 	int ret, rollback_ret;
@@ -216,8 +252,20 @@ static int prepare_import_memory(struct obmm_import_region *i_reg)
 		i_reg->numa_id = NUMA_NO_NODE;
 	}
 
-	return 0;
+	ret = setup_iomem_resource(i_reg);
+	if (ret)
+		goto out_teardown_numa;
 
+	return 0;
+out_teardown_numa:
+	if (region_numa_remote(&i_reg->region)) {
+		rollback_ret = teardown_remote_numa(i_reg, true);
+		if (rollback_ret) {
+			pr_err("failed to teardown remote numa on rollback, ret=%pe.\n",
+			       ERR_PTR(rollback_ret));
+			ret = -ENOTRECOVERABLE;
+		}
+	}
 out_teardown_pa:
 	rollback_ret = teardown_pa(i_reg);
 	if (rollback_ret) {
@@ -238,6 +286,10 @@ out_free_addr_range:
 static int release_import_memory(struct obmm_import_region *i_reg)
 {
 	int ret, rollback_ret, old_numa_id;
+
+	ret = teardown_iomem_resource(i_reg);
+	if (ret)
+		return ret;
 
 	if (region_numa_remote(&i_reg->region)) {
 		old_numa_id = i_reg->numa_id;
@@ -283,6 +335,12 @@ err_flush:
 		}
 	}
 err_teardown_numa:
+	rollback_ret = setup_iomem_resource(i_reg);
+	if (rollback_ret) {
+		pr_err("failed to restore iomem resource on rollback, ret=%pe.\n",
+		       ERR_PTR(rollback_ret));
+		return -ENOTRECOVERABLE;
+	}
 	return ret;
 }
 
@@ -415,6 +473,8 @@ int obmm_import(struct obmm_cmd_import *cmd_import)
 	if (i_reg == NULL)
 		return -ENOMEM;
 
+	atomic_set(&i_reg->region.device_released, 1);
+
 	/* arguments to region (logs produced by callee) */
 	retval = init_import_region_from_cmd(cmd_import, i_reg);
 	if (retval)
@@ -455,6 +515,7 @@ out_release_memory:
 out_region_uninit:
 	uninit_obmm_region(&i_reg->region);
 out_free_ireg:
+	wait_until_dev_released(&i_reg->region);
 	kfree(i_reg);
 	return retval;
 }
@@ -493,6 +554,7 @@ int obmm_unimport(const struct obmm_cmd_unimport *cmd_unimport)
 
 	deregister_obmm_region(reg);
 	uninit_obmm_region(reg);
+	wait_until_dev_released(&i_reg->region);
 	kfree(i_reg);
 
 	pr_info("%s: mem_id=%llu completed.\n", __func__, cmd_unimport->mem_id);

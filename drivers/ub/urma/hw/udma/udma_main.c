@@ -891,11 +891,10 @@ err_ce_register:
 	return ret;
 }
 
-static void udma_unregister_event(struct auxiliary_device *adev)
+static void udma_unregister_none_crq_event(struct auxiliary_device *adev)
 {
 	ubase_port_unregister(adev);
 	udma_unregister_ctrlq_event(adev);
-	udma_unregister_crq_event(adev);
 	udma_unregister_ce_event(adev);
 	udma_unregister_ae_event(adev);
 }
@@ -1021,7 +1020,8 @@ err_init_eid:
 err_set_ubcore_dev:
 	udma_unregister_activate_workqueue(udma_dev);
 err_register_act_init:
-	udma_unregister_event(adev);
+	udma_unregister_none_crq_event(adev);
+	udma_unregister_crq_event(adev);
 err_event_register:
 	udma_destroy_dev(udma_dev);
 err_create:
@@ -1096,12 +1096,12 @@ void udma_reset_uninit(struct auxiliary_device *adev)
 		return;
 	}
 
-	/* Event should unregister before unset ubcore dev. */
-	udma_unregister_event(adev);
+	udma_unregister_none_crq_event(adev);
 	udma_unset_ubcore_dev(udma_dev);
 	udma_unregister_debugfs(udma_dev);
 	udma_unregister_activate_workqueue(udma_dev);
 	udma_open_ue_rx(udma_dev, false, false, true, 0);
+	udma_unregister_crq_event(adev);
 	udma_destroy_dev(udma_dev);
 	mutex_unlock(&udma_reset_mutex);
 }
@@ -1123,10 +1123,6 @@ int udma_probe(struct auxiliary_device *adev,
 
 void udma_remove(struct auxiliary_device *adev)
 {
-#define MIN_SLEEP_TIME 100
-#define MAX_SLEEP_TIME 800
-#define TIME_SLEEP_RATE 2
-	uint32_t wait_time = MIN_SLEEP_TIME;
 	struct udma_dev *udma_dev;
 
 	ubase_reset_unregister(adev);
@@ -1139,25 +1135,19 @@ void udma_remove(struct auxiliary_device *adev)
 	}
 
 	ubcore_stop_requests(&udma_dev->ub_dev);
-	while (true) {
-		if (!udma_close_ue_rx(udma_dev, false, false, false, 0))
-			break;
-		msleep(wait_time);
-		if (wait_time < MAX_SLEEP_TIME)
-			wait_time *= TIME_SLEEP_RATE;
-		dev_err_ratelimited(&adev->dev, "udma close ue rx failed in remove process.\n");
-	}
+	if (udma_close_ue_rx(udma_dev, false, false, false, 0))
+		dev_err(&adev->dev, "udma close ue rx failed in remove process.\n");
+
 	udma_dev->status = UDMA_SUSPEND;
 	udma_report_reset_event(UBCORE_EVENT_ELR_ERR, udma_dev);
-
-	/* Event should unregister before unset ubcore dev. */
-	udma_unregister_event(adev);
+	udma_unregister_none_crq_event(adev);
 	udma_unset_ubcore_dev(udma_dev);
 	udma_unregister_debugfs(udma_dev);
 	udma_unregister_activate_workqueue(udma_dev);
 	check_and_wait_flush_done(udma_dev);
 	if (is_rmmod)
 		(void)ubase_activate_dev(adev);
+	udma_unregister_crq_event(adev);
 	udma_destroy_dev(udma_dev);
 	mutex_unlock(&udma_reset_mutex);
 	dev_info(&adev->dev, "udma device remove success.\n");
