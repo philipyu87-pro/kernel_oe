@@ -41,4 +41,7 @@ static inline bool ubcore_check_ctrlplane_compat(void *op_ptr)
 	return (op_ptr == NULL);
 }
 
+int ubcore_check_jetty(struct ubcore_jetty *jetty,
+	struct ubcore_tjetty *tjetty);
+
 #endif

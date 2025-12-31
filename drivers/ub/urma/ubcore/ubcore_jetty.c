@@ -1183,6 +1183,7 @@ struct ubcore_jetty *ubcore_create_jetty(struct ubcore_device *dev,
 					 ubcore_event_callback_t jfae_handler,
 					 struct ubcore_udata *udata)
 {
+	struct ubcore_jetty_ctx *ctx;
 	struct ubcore_jetty *jetty;
 	int ret;
 
@@ -1234,11 +1235,16 @@ struct ubcore_jetty *ubcore_create_jetty(struct ubcore_device *dev,
 	kref_init(&jetty->ref_cnt);
 	init_completion(&jetty->comp);
 
+	ctx = kzalloc(sizeof(struct ubcore_jetty_ctx), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(ctx))
+		goto destroy_tptable;
+	jetty->jetty_cfg.jetty_context = ctx;
+
 	ret = ubcore_hash_table_find_add(&dev->ht[UBCORE_HT_JETTY],
 					 &jetty->hnode, jetty->jetty_id.id);
 	if (ret != 0) {
 		ubcore_log_err("Failed to add jetty.\n");
-		goto destroy_tptable;
+		goto free_ctx;
 	}
 
 	atomic_inc(&cfg->send_jfc->use_cnt);
@@ -1248,6 +1254,9 @@ struct ubcore_jetty *ubcore_create_jetty(struct ubcore_device *dev,
 		atomic_inc(&cfg->jfr->use_cnt);
 
 	return jetty;
+free_ctx:
+	kfree(ctx);
+	jetty->jetty_cfg.jetty_context = NULL;
 destroy_tptable:
 	ubcore_destroy_tptable(&jetty->tptable);
 delete_jetty_to_grp:
@@ -1324,6 +1333,14 @@ static int ubcore_check_jetty_attr(struct ubcore_jetty *jetty)
 	return 0;
 }
 
+static void ubcore_free_jetty_ctx(struct ubcore_jetty *jetty)
+{
+	if (jetty->jetty_cfg.jetty_context) {
+		kfree(jetty->jetty_cfg.jetty_context);
+		jetty->jetty_cfg.jetty_context = NULL;
+	}
+}
+
 int ubcore_delete_jetty(struct ubcore_jetty *jetty)
 {
 	struct ubcore_jetty_group *jetty_grp;
@@ -1346,6 +1363,7 @@ int ubcore_delete_jetty(struct ubcore_jetty *jetty)
 
 	(void)ubcore_hash_table_check_remove(&dev->ht[UBCORE_HT_JETTY],
 					     &jetty->hnode);
+	ubcore_free_jetty_ctx(jetty);
 	ubcore_destroy_tptable(&jetty->tptable);
 
 	if (jetty->ub_dev->transport_type == UBCORE_TRANSPORT_UB &&
@@ -1443,6 +1461,7 @@ int ubcore_delete_jetty_batch(struct ubcore_jetty **jetty_arr, int jetty_num,
 
 		(void)ubcore_hash_table_check_remove(&dev->ht[UBCORE_HT_JETTY],
 						     &jetty->hnode);
+		ubcore_free_jetty_ctx(jetty);
 		ubcore_destroy_tptable(&jetty->tptable);
 
 		if (jetty->ub_dev->transport_type == UBCORE_TRANSPORT_UB &&
@@ -1938,6 +1957,9 @@ int ubcore_bind_jetty_ex(struct ubcore_jetty *jetty,
 			 struct ubcore_active_tp_cfg *active_tp_cfg,
 			 struct ubcore_udata *udata)
 {
+	struct ubcore_jetty_ctx *ctx;
+	int ret;
+	
 	if (!jetty || !tjetty || !jetty->ub_dev ||
 	    !jetty->ub_dev->ops || !active_tp_cfg) {
 		ubcore_log_err("Invalid parameter.\n");
@@ -1959,6 +1981,12 @@ int ubcore_bind_jetty_ex(struct ubcore_jetty *jetty,
 		return -EINVAL;
 	}
 
+	ret = ubcore_check_jetty(jetty, tjetty);
+	if (ret != 0) {
+		ubcore_log_err("Failed to check jetty, ret: %d.\n", ret);
+		return ret;
+	}
+
 	if (tjetty->vtpn &&
 	    (!is_create_rc_shared_tp(tjetty->cfg.trans_mode,
 				     tjetty->cfg.flag.bs.order_type,
@@ -1968,14 +1996,25 @@ int ubcore_bind_jetty_ex(struct ubcore_jetty *jetty,
 		return -EINVAL;
 	}
 
-	return ubcore_inner_bind_jetty_ctrlplane(jetty, tjetty, active_tp_cfg,
+	ctx = jetty->jetty_cfg.jetty_context;
+	if (!IS_ERR_OR_NULL(ctx)) {
+		ctx->init_valid = true;
+		ctx->init_rjetty_id = tjetty->cfg.id.id;
+	}
+
+	ret = ubcore_inner_bind_jetty_ctrlplane(jetty, tjetty, active_tp_cfg,
 						 udata);
+	if (ret && !IS_ERR_OR_NULL(ctx))
+		ctx->init_valid = false;
+
+	return ret;
 }
 EXPORT_SYMBOL(ubcore_bind_jetty_ex);
 
 static int ubcore_inner_unbind_ub_jetty(struct ubcore_jetty *jetty,
 					struct ubcore_tjetty *tjetty)
 {
+	struct ubcore_jetty_ctx *ctx;
 	int ret;
 
 	if (tjetty->vtpn) {
@@ -1991,6 +2030,12 @@ static int ubcore_inner_unbind_ub_jetty(struct ubcore_jetty *jetty,
 			}
 			tjetty->vtpn = NULL;
 			mutex_unlock(&tjetty->lock);
+		}
+
+		if (jetty->jetty_cfg.trans_mode == UBCORE_TP_RC) {
+			ctx = jetty->jetty_cfg.jetty_context;
+			if (!IS_ERR_OR_NULL(ctx))
+				ctx->init_valid = false;
 		}
 	}
 	return 0;
@@ -2056,6 +2101,18 @@ struct ubcore_jetty *ubcore_find_jetty(struct ubcore_device *dev,
 					&jetty_id);
 }
 EXPORT_SYMBOL(ubcore_find_jetty);
+
+struct ubcore_jetty *ubcore_find_get_jetty(struct ubcore_device *dev,
+	uint32_t jetty_id)
+{
+	if (!dev) {
+		ubcore_log_err("invalid parameter.\n");
+		return NULL;
+	}
+
+	return ubcore_hash_table_lookup_get(&dev->ht[UBCORE_HT_JETTY], jetty_id,
+		&jetty_id);
+}
 
 struct ubcore_jetty_group *ubcore_create_jetty_grp(
 	struct ubcore_device *dev, struct ubcore_jetty_grp_cfg *cfg,

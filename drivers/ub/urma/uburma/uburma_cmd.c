@@ -3068,7 +3068,8 @@ static int uburma_cmd_exchange_tp_info(struct ubcore_device *ubc_dev,
 		return ret;
 	get_tcp_cfg = arg.in.get_tp_cfg;
 	ret = ubcore_exchange_tp_info(ubc_dev, &get_tcp_cfg, arg.in.tp_handle,
-		arg.in.tx_psn, &peer_tp_handle, &rx_psn, &udata);
+		arg.in.tx_psn, &peer_tp_handle, &rx_psn, arg.in.src_jetty_id,
+		arg.in.dst_jetty_id, &udata);
 	if (ret != 0) {
 		uburma_log_err("Failed to exchange tp info, ret: %d.\n", ret);
 		return ret;

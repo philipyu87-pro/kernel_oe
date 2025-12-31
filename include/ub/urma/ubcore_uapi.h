@@ -628,6 +628,8 @@ int ubcore_get_tp_attr(struct ubcore_device *dev, const uint64_t tp_handle,
  * @param[in] tx_psn: local packet sequence number;
  * @param[out] peer_tp_handle: tp_handle got by ubcore_exchange_tp_info;
  * @param[out] rx_psn: remote packet sequence number;
+ * @param[in] src_jetty_id: source jetty id;
+ * @param[in] dst_jetty_id: dest jetty id;
  * @param[in] udata: [Optional] udata should be NULL when called
  *                   by kernel application and be valid when called
  *                   by user space application
@@ -636,7 +638,8 @@ int ubcore_get_tp_attr(struct ubcore_device *dev, const uint64_t tp_handle,
 int ubcore_exchange_tp_info(struct ubcore_device *dev,
 				struct ubcore_get_tp_cfg *cfg, uint64_t tp_handle,
 				uint32_t tx_psn, uint64_t *peer_tp_handle,
-				uint32_t *rx_psn, struct ubcore_udata *udata);
+				uint32_t *rx_psn, uint32_t src_jetty_id,
+				uint32_t dst_jetty_id, struct ubcore_udata *udata);
 
 /**
  * operation of user ioctl cmd.
