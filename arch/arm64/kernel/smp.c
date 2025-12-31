@@ -1288,7 +1288,7 @@ static u64 arch_get_cpu_freq(void)
 
 	return cpu_freq;
 }
-
+/*
 u64 hw_nmi_get_sample_period(int watchdog_thresh)
 {
 	u64 cpu_freq;
@@ -1303,4 +1303,5 @@ u64 hw_nmi_get_sample_period(int watchdog_thresh)
 
 	return 0;
 }
+*/
 #endif
