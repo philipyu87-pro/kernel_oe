@@ -1442,6 +1442,10 @@ uburma_exchange_tp_info_fill_spec_in(void *arg_addr,
 	     arg->in.get_tp_cfg.peer_eid);
 	SPEC(s++, EXCHANGE_TP_INFO_IN_TP_HANDLE, arg->in.tp_handle);
 	SPEC(s++, EXCHANGE_TP_INFO_IN_TX_PSN, arg->in.tx_psn);
+	SPEC(s++, EXCHANGE_TP_INFO_IN_SRC_JETTY_ID,
+		arg->in.src_jetty_id);
+	SPEC(s++, EXCHANGE_TP_INFO_IN_DST_JETTY_ID,
+		arg->in.dst_jetty_id);
 }
 
 static void

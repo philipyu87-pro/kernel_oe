@@ -88,6 +88,14 @@ struct ubcore_global_file {
 	struct ubcore_uvs_instance *uvs;
 };
 
+struct ubcore_jetty_ctx {
+	/* Only for RC connection */
+	uint32_t init_rjetty_id;
+	bool init_valid;
+	uint32_t targ_rjetty_id;
+	bool targ_valid;
+};
+
 static inline struct ubcore_ucontext *
 ubcore_get_uctx(struct ubcore_udata *udata)
 {
@@ -164,6 +172,9 @@ static inline uint32_t ubcore_get_jetty_hash(struct ubcore_jetty_id *jetty_id)
 {
 	return jhash(jetty_id, sizeof(struct ubcore_jetty_id), 0);
 }
+
+struct ubcore_jetty *ubcore_find_get_jetty(struct ubcore_device *dev,
+	uint32_t jetty_id);
 
 static inline uint32_t ubcore_get_tseg_hash(struct ubcore_ubva *ubva)
 {

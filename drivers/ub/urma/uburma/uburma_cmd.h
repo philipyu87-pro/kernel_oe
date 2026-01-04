@@ -971,6 +971,9 @@ struct uburma_cmd_exchange_tp_info {
 		struct ubcore_get_tp_cfg get_tp_cfg;
 		uint64_t tp_handle;
 		uint32_t tx_psn;
+		/* Only for RC trans_mode */
+		uint32_t src_jetty_id;
+		uint32_t dst_jetty_id;
 	} in;
 	struct {
 		uint64_t peer_tp_handle;

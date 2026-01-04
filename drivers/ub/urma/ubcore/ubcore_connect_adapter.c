@@ -11,6 +11,8 @@
 
 #include <linux/random.h>
 #include <ub/urma/ubcore_uapi.h>
+#include <ub/urma/ubcore_jetty.h>
+
 #include "ubcore_log.h"
 #include "net/ubcore_net.h"
 #include "net/ubcore_session.h"
@@ -22,7 +24,8 @@ enum msg_create_conn_result {
 	CREATE_CONN_SUCCESS = 0,
 	GET_TP_LIST_ERROR,
 	ACTIVE_TP_ERROR,
-	CREATE_CONN_FAIL
+	CREATE_CONN_FAIL,
+	CHECK_JETTY_FAIL
 };
 
 struct session_data_create_conn {
@@ -35,6 +38,9 @@ struct msg_create_conn_req {
 	struct ubcore_get_tp_cfg get_tp_cfg;
 	uint64_t tp_handle;
 	uint32_t tx_psn;
+	/* Only for RC + RTP */
+	uint32_t src_jetty_id;
+	uint32_t dst_jetty_id;
 };
 
 struct msg_create_conn_resp {
@@ -45,6 +51,9 @@ struct msg_create_conn_resp {
 
 struct msg_destroy_conn_req {
 	union ubcore_tp_handle tp_handle;
+	/* Only for RC + RTP */
+	uint32_t src_jetty_id;
+	uint32_t dst_jetty_id;
 };
 
 static int ubcore_active_tp(struct ubcore_device *dev,
@@ -265,7 +274,8 @@ static void ubcore_free_local_tpid(struct ubcore_device *dev,
 int ubcore_exchange_tp_info(struct ubcore_device *dev,
 				struct ubcore_get_tp_cfg *cfg, uint64_t tp_handle,
 				uint32_t tx_psn, uint64_t *peer_tp_handle,
-				uint32_t *rx_psn, struct ubcore_udata *udata)
+				uint32_t *rx_psn, uint32_t src_jetty_id,
+				uint32_t dst_jetty_id, struct ubcore_udata *udata)
 {
 	struct session_data_create_conn *session_data;
 	struct msg_create_conn_req req = { 0 };
@@ -293,6 +303,10 @@ int ubcore_exchange_tp_info(struct ubcore_device *dev,
 	req.get_tp_cfg = *cfg;
 	req.tp_handle = tp_handle;
 	req.tx_psn = tx_psn;
+	if (cfg->trans_mode == UBCORE_TP_RC) {
+		req.src_jetty_id = src_jetty_id;
+		req.dst_jetty_id = dst_jetty_id;
+	}
 	ret = send_create_req(dev, ubcore_session_get_id(session), &req);
 	if (ret != 0) {
 		ubcore_log_err("Failed to send create req message");
@@ -326,6 +340,48 @@ int ubcore_exchange_tp_info(struct ubcore_device *dev,
 	return 0;
 }
 EXPORT_SYMBOL(ubcore_exchange_tp_info);
+
+static int ubcore_record_jetty(struct ubcore_device *dev,
+	struct msg_create_conn_req *req)
+{
+	struct ubcore_jetty_ctx *ctx;
+	struct ubcore_jetty *jetty;
+
+	jetty = ubcore_find_get_jetty(dev, req->dst_jetty_id);
+	if (IS_ERR_OR_NULL(jetty)) {
+		ubcore_log_warn("Do not find jetty, jetty_id: %u.\n",
+			req->dst_jetty_id);
+		return 0;
+	}
+
+	if (IS_ERR_OR_NULL(jetty->jetty_cfg.jetty_context)) {
+		ubcore_log_warn("Do not find jetty context.\n");
+		ubcore_put_jetty(jetty);
+		return 0;
+	}
+
+	ctx = jetty->jetty_cfg.jetty_context;
+	if (ctx->targ_valid && ctx->targ_rjetty_id != req->src_jetty_id) {
+		ubcore_log_err(
+			"Invalid target, rjetty_id: %u, src_id: %u.\n",
+			ctx->targ_rjetty_id, req->src_jetty_id);
+		ubcore_put_jetty(jetty);
+		return -1;
+	}
+
+	if (ctx->init_valid && ctx->init_rjetty_id != req->src_jetty_id) {
+		ubcore_log_err(
+			"Invalid init, rjetty_id: %u, src_id: %u.\n",
+			ctx->init_rjetty_id, req->src_jetty_id);
+		ubcore_put_jetty(jetty);
+		return -1;
+	}
+
+	ctx->targ_valid = true;
+	ctx->targ_rjetty_id = req->src_jetty_id;
+	ubcore_put_jetty(jetty);
+	return 0;
+}
 
 static void handle_create_req(struct ubcore_device *dev,
 			      struct ubcore_net_msg *msg, void *conn)
@@ -373,6 +429,14 @@ static void handle_create_req(struct ubcore_device *dev,
 		goto send_resp;
 	}
 
+	if (get_tp_cfg.trans_mode == UBCORE_TP_RC &&
+		ubcore_record_jetty(dev, req) != 0) {
+		ret = CHECK_JETTY_FAIL;
+		(void)ubcore_deactive_tp(dev,
+			(union ubcore_tp_handle)tp_handle, NULL);
+		goto send_resp;
+	}
+
 	resp.tp_handle = tp_handle;
 	resp.tx_psn = tx_psn;
 	ret = CREATE_CONN_SUCCESS;
@@ -411,13 +475,16 @@ static void handle_create_resp(struct ubcore_device *dev,
 }
 
 static int send_destroy_req(struct ubcore_device *dev, union ubcore_eid addr,
-			    union ubcore_tp_handle tp_handle)
+			    union ubcore_tp_handle tp_handle, uint32_t src_jetty_id,
+				uint32_t dst_jetty_id)
 {
 	struct ubcore_net_msg msg = { 0 };
 	struct msg_destroy_conn_req req = { 0 };
 	int ret;
 
 	req.tp_handle = tp_handle;
+	req.src_jetty_id = src_jetty_id;
+	req.dst_jetty_id = dst_jetty_id;
 
 	msg.type = UBCORE_NET_DESTROY_REQ;
 	msg.len = (uint16_t)sizeof(struct msg_destroy_conn_req);
@@ -469,7 +536,8 @@ int ubcore_adapter_layer_disconnect(struct ubcore_vtpn *vtpn)
 	if ((vtpn->trans_mode == UBCORE_TP_RM ||
 	     vtpn->trans_mode == UBCORE_TP_RC) &&
 	    !ctp && ubcore_check_ctrlplane_compat(dev->ops->import_jetty)) {
-		ret = send_destroy_req(dev, peer_eid, peer_tp_handle);
+		ret = send_destroy_req(dev, peer_eid, peer_tp_handle,
+			vtpn->local_jetty, vtpn->peer_jetty);
 		if (ret != 0)
 			ubcore_log_err("Failed to send destroy req message");
 	}
@@ -482,12 +550,26 @@ static void handle_destroy_req(struct ubcore_device *dev,
 {
 	struct msg_destroy_conn_req *req =
 		(struct msg_destroy_conn_req *)msg->data;
+	struct ubcore_jetty_ctx *ctx;
+	struct ubcore_jetty *jetty;
 	int ret;
 
 	/* Target tp_handle get from kernel space */
 	ret = ubcore_deactive_tp(dev, req->tp_handle, NULL);
 	if (ret != 0)
 		ubcore_log_err("Failed to deactivate tp");
+
+	jetty = ubcore_find_get_jetty(dev, req->dst_jetty_id);
+	if (IS_ERR_OR_NULL(jetty)) {
+		ubcore_log_warn("Do not find jetty, jetty_id: %u.\n",
+			req->dst_jetty_id);
+		return;
+	}
+
+	ctx = jetty->jetty_cfg.jetty_context;
+	if (!IS_ERR_OR_NULL(ctx))
+		ctx->targ_valid = false;
+	ubcore_put_jetty(jetty);
 }
 
 /* Only for impoprt_jetty/jfr, thus only for RM/UM */
@@ -559,7 +641,7 @@ struct ubcore_tjetty *ubcore_import_jfr_compat(struct ubcore_device *dev,
 			dev, &get_tp_cfg, tp_list.tp_handle.value,
 			active_tp_cfg.tp_attr.tx_psn,
 			&active_tp_cfg.peer_tp_handle.value,
-			&active_tp_cfg.tp_attr.rx_psn, udata);
+			&active_tp_cfg.tp_attr.rx_psn, 0, 0, udata);
 		if (ret != 0) {
 			ubcore_log_err("Failed to exchange tp info, ret: %d.\n",
 				       ret);
@@ -612,7 +694,7 @@ struct ubcore_tjetty *ubcore_import_jetty_compat(struct ubcore_device *dev,
 				dev, &get_tp_cfg, tp_list.tp_handle.value,
 				active_tp_cfg.tp_attr.tx_psn,
 				&active_tp_cfg.peer_tp_handle.value,
-				&active_tp_cfg.tp_attr.rx_psn, udata);
+				&active_tp_cfg.tp_attr.rx_psn, 0, 0, udata);
 			if (ret != 0) {
 				ubcore_log_err(
 					"Failed to exchange tp info, ret: %d.\n",
@@ -634,6 +716,33 @@ struct ubcore_tjetty *ubcore_import_jetty_compat(struct ubcore_device *dev,
 	return tjetty;
 }
 
+int ubcore_check_jetty(struct ubcore_jetty *jetty,
+	struct ubcore_tjetty *tjetty)
+{
+	struct ubcore_jetty_ctx *ctx = jetty->jetty_cfg.jetty_context;
+
+	if (IS_ERR_OR_NULL(ctx)) {
+		ubcore_log_err("Invalid parameter.\n");
+		return -EINVAL;
+	}
+
+	if (ctx->init_valid && ctx->init_rjetty_id != tjetty->cfg.id.id) {
+		ubcore_log_err(
+			"Failed to check init, expect: %d, read: %u.\n",
+			ctx->init_rjetty_id, tjetty->cfg.id.id);
+		return -EINVAL;
+	}
+
+	if (ctx->targ_valid && ctx->targ_rjetty_id != tjetty->cfg.id.id) {
+		ubcore_log_err(
+			"Failed to check target, expect: %d, read: %u.\n",
+			ctx->targ_rjetty_id, tjetty->cfg.id.id);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 int ubcore_bind_jetty_compat(struct ubcore_jetty *jetty,
 			     struct ubcore_tjetty *tjetty,
 			     struct ubcore_udata *udata)
@@ -644,6 +753,10 @@ int ubcore_bind_jetty_compat(struct ubcore_jetty *jetty,
 	struct ubcore_tp_info tp_list = { 0 };
 	uint32_t tp_cnt = 1;
 	int ret;
+
+	ret = ubcore_check_jetty(jetty, tjetty);
+	if (ret != 0)
+		return ret;
 
 	ret = ubcore_fill_get_tp_cfg(dev, &get_tp_cfg, &tjetty->cfg);
 	if (ret != 0)
@@ -664,7 +777,8 @@ int ubcore_bind_jetty_compat(struct ubcore_jetty *jetty,
 					tp_list.tp_handle.value,
 					active_tp_cfg.tp_attr.tx_psn,
 					&active_tp_cfg.peer_tp_handle.value,
-					&active_tp_cfg.tp_attr.rx_psn, udata);
+					&active_tp_cfg.tp_attr.rx_psn, jetty->jetty_id.id,
+					tjetty->cfg.id.id, udata);
 		if (ret != 0) {
 			ubcore_log_err("Failed to exchange tp info, ret: %d.\n", ret);
 			return ret;
