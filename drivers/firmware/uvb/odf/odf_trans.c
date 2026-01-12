@@ -10,6 +10,7 @@
 #include <linux/string.h>
 #include <linux/module.h>
 #include <linux/printk.h>
+#include <linux/of.h>
 #include "cis_uvb_interface.h"
 #include "odf_interface.h"
 #include "odf_handle.h"
@@ -390,16 +391,25 @@ static int create_odf_info(void)
 	acpi_status status;
 	int ret = 0;
 	u16 count = 0;
+	struct device_node *chosen_node;
 
 	status = acpi_get_table(ACPI_SIG_UBRT, 0, &ubrt_header);
 	if (ACPI_SUCCESS(status)) {
 		pr_info("Success fully get UBRT table\n");
 		return 0;
 	}
-	ret = odf_get_fdt_ubiostbl(&od_root_phys, "linux,ubiostbl");
-	if (ret) {
-		pr_err("from fdt get ubiostbl failed\n");
+
+	chosen_node = of_find_node_by_name(of_root, "chosen");
+	if (!chosen_node) {
+		pr_err("failed to find chosen node\n");
 		return -1;
+	}
+
+	ret = of_property_read_u64(chosen_node, "linux,ubiostbl", &od_root_phys);
+	if (ret) {
+		pr_err("failed to read ubiostbl property\n");
+		of_node_put(chosen_node);
+		return ret;
 	}
 
 	od_root_origin = (struct ubios_od_root *)
@@ -454,7 +464,7 @@ static int __init odf_init(void)
 	status = create_odf_info();
 	if (status) {
 		pr_err("odf table init failed\n");
-		return -1;
+		return 0;
 	}
 
 	status = create_cis_info_from_odf();
