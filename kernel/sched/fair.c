@@ -6389,8 +6389,23 @@ wake_affine_idle(int this_cpu, int prev_cpu, int sync)
 	if (available_idle_cpu(this_cpu) && cpus_share_cache(this_cpu, prev_cpu))
 		return available_idle_cpu(prev_cpu) ? prev_cpu : this_cpu;
 
-	if (sync && cpu_rq(this_cpu)->nr_running == 1)
+	if (sync && cpu_rq(this_cpu)->nr_running == 1) {
+#ifdef CONFIG_NUMA
+		/*
+		 * Do not pull the task to this_cpu across NUMA nodes for
+		 * sync wakeups. Cross-NUMA migration causes significant
+		 * performance degradation due to remote memory access
+		 * latency, especially for IO-intensive workloads such as
+		 * virtual machines using distributed storage (e.g. Ceph
+		 * RBD) on multi-socket ARM64 systems like kunpeng920.
+		 * Prefer prev_cpu if it is idle and on a different node.
+		 */
+		if (cpu_to_node(this_cpu) != cpu_to_node(prev_cpu) &&
+		    available_idle_cpu(prev_cpu))
+			return prev_cpu;
+#endif
 		return this_cpu;
+	}
 
 	return nr_cpumask_bits;
 }
@@ -6407,8 +6422,20 @@ wake_affine_weight(struct sched_domain *sd, struct task_struct *p,
 	if (sync) {
 		unsigned long current_load = task_h_load(current);
 
-		if (current_load > this_eff_load)
+		if (current_load > this_eff_load) {
+#ifdef CONFIG_NUMA
+			/*
+			 * Avoid cross-NUMA migration for sync wakeups
+			 * when prev_cpu is idle. The remote memory access
+			 * penalty outweighs the benefit of stacking on
+			 * a lightly loaded CPU on a different node.
+			 */
+			if (cpu_to_node(this_cpu) != cpu_to_node(prev_cpu) &&
+			    available_idle_cpu(prev_cpu))
+				return prev_cpu;
+#endif
 			return this_cpu;
+		}
 
 		this_eff_load -= current_load;
 	}
