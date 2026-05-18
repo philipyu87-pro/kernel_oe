@@ -321,10 +321,8 @@ static int vm_walk_host_range(unsigned long long start,
 	spin_unlock_irq(&pic->kvm->mmu_lock);
 #endif
 	down_read(&walk->mm->mmap_lock);
-	local_irq_disable();
 	ret = walk_page_range(walk->mm, start + tmp_gpa_to_hva, end + tmp_gpa_to_hva,
 			walk->ops, walk->private);
-	local_irq_enable();
 	up_read(&walk->mm->mmap_lock);
 	pic->gpa_to_hva = tmp_gpa_to_hva;
 	if (pic->flags & VM_SCAN_HOST) {
