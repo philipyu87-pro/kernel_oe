@@ -321,6 +321,11 @@ static int vm_walk_host_range(unsigned long long start,
 	spin_unlock_irq(&pic->kvm->mmu_lock);
 #endif
 	down_read(&walk->mm->mmap_lock);
+	/*
+	 * vm_walk_host_range() is entered after dropping kvm->mmu_lock, and the
+	 * host page table walk itself is serialized by mmap_lock. Keep IRQs
+	 * enabled here so large host fallback walks do not trigger soft lockups.
+	 */
 	ret = walk_page_range(walk->mm, start + tmp_gpa_to_hva, end + tmp_gpa_to_hva,
 			walk->ops, walk->private);
 	up_read(&walk->mm->mmap_lock);
