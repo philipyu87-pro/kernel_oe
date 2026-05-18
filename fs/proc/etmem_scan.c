@@ -324,6 +324,7 @@ static int vm_walk_host_range(unsigned long long start,
 	ret = walk_page_range(walk->mm, start + tmp_gpa_to_hva, end + tmp_gpa_to_hva,
 			walk->ops, walk->private);
 	up_read(&walk->mm->mmap_lock);
+	cond_resched();
 	pic->gpa_to_hva = tmp_gpa_to_hva;
 	if (pic->flags & VM_SCAN_HOST) {
 		pic->restart_gpa -= tmp_gpa_to_hva;
@@ -1172,6 +1173,7 @@ static int mm_idle_pmd_entry(pmd_t *pmd, unsigned long addr,
 	enum ProcIdlePageType pte_page_type;
 	int err;
 
+	cond_resched();
 	/*
 	 * Skip duplicate PMD_IDLE_PTES: when the PMD crosses VMA boundary,
 	 * walk_page_range() can call on the same PMD twice.
